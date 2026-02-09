@@ -1,10 +1,5 @@
 # EAS 587 Phase 1: Crime Data Analysis
 
-## Team Members
-- [Your Name]
-- [Team Member 2]
-- [Team Member 3]
-
 ## Project Overview
 Analysis of crime data from 2020 to present.
 
