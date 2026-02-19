@@ -1,675 +1,485 @@
 """
-Phase 1 Exploratory Data Analysis (EDA) pipeline.
-
-Outputs:
-1) CSV tables with major EDA results
-2) PNG figures with labeled charts
-3) JSON + TXT summary for report writing
+edo.py
+Exploratory Data Analysis Module for LA Crime Data
+EAS 587 - Phase 1 Project
+Following John Tukey's EDA Principles
 """
 
-from __future__ import annotations
-
-import argparse
-import json
-import os
-from pathlib import Path
-from typing import Any, Dict, List
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-os.environ.setdefault("MPLCONFIGDIR", str(PROJECT_ROOT / ".mplcache"))
-
-import matplotlib
-import numpy as np
 import pandas as pd
-import seaborn as sns
-
-matplotlib.use("Agg")
+import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
 
-DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "crime_data_cleaned.csv"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "processed" / "eda"
+# Set style for plots
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set_palette("husl")
 
-DATE_COLUMNS = ["date_occ", "date_rptd"]
-NUMERIC_COLUMNS = [
-    "dr_no",
-    "time_occ",
-    "occ_hour",
-    "occ_minute",
-    "area",
-    "rpt_dist_no",
-    "part_1_2",
-    "crm_cd",
-    "premis_cd",
-    "weapon_used_cd",
-    "crm_cd_1",
-    "lat",
-    "lon",
-    "vict_age",
-    "occ_year",
-    "occ_month",
-    "report_delay_days",
-]
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Run EDA pipeline on cleaned crime data.")
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT_PATH, help="Cleaned CSV input path")
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="EDA output directory")
-    return parser.parse_args()
-
-
-def save_plot(path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-def save_table(df, path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
-
-
-def load_cleaned_data(path):
-    if not path.exists():
-        raise FileNotFoundError(f"Cleaned dataset not found: {path}")
-
-    df = pd.read_csv(path, low_memory=False)
-    for col in DATE_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
-
-    for col in NUMERIC_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
+def load_cleaned_data(filepath):
+    """Load cleaned crime data."""
+    print("Loading cleaned data...")
+    df = pd.read_csv(filepath, parse_dates=['Date Rptd', 'DATE OCC'])
+    print(f"Loaded {len(df):,} records")
     return df
 
+# ============================================
+# EDA OPERATION 1: Summary Statistics
+# ============================================
+def eda_summary_statistics(df):
+    """
+    EDA 1: Generate comprehensive summary statistics
+    Following Tukey's principle of understanding data through summaries
+    """
+    print("\n" + "="*60)
+    print("EDA 1: SUMMARY STATISTICS")
+    print("="*60)
 
-def run_eda(input_path, output_dir):
-    sns.set_theme(style="whitegrid")
+    # Numeric columns summary
+    numeric_cols = ['Vict Age', 'Hour', 'Reporting Delay (Days)']
+    print("\nNumeric Columns Summary:")
+    print(df[numeric_cols].describe())
 
-    tables_dir = output_dir / "tables"
-    plots_dir = output_dir / "plots"
-    tables_dir.mkdir(parents=True, exist_ok=True)
-    plots_dir.mkdir(parents=True, exist_ok=True)
+    # Categorical summaries
+    print("\nCrime Categories:")
+    print(df['Crime Category'].value_counts())
 
-    df = load_cleaned_data(input_path)
-    operations: List[Dict[str, Any]] = []
-    key_findings: List[str] = []
+    print("\nPremise Categories:")
+    print(df['Premise Category'].value_counts())
 
-    def record_operation(
-        name: str,
-        description: str,
-        tables = None,
-        plots= None,
-        status= "completed",
-        note =None,
-    ):
-        entry: Dict[str, Any] = {
-            "name": name,
-            "description": description,
-            "status": status,
-            "tables": tables or [],
-            "plots": plots or [],
-        }
-        if note:
-            entry["note"] = note
-        operations.append(entry)
-    date_min = str(df["date_occ"].min().date()) if "date_occ" in df.columns and df["date_occ"].notna().any() else None
-    date_max = str(df["date_occ"].max().date()) if "date_occ" in df.columns and df["date_occ"].notna().any() else None
-    profile = {
-        "total_rows": int(len(df)),
-        "total_columns": int(len(df.columns)),
-        "unique_incidents_dr_no": int(df["dr_no"].nunique()) if "dr_no" in df.columns else None,
-        "date_occ_min": date_min,
-        "date_occ_max": date_max,
-    }
-    profile_df = pd.DataFrame([profile])
-    profile_path = tables_dir / "01_dataset_profile.csv"
-    save_table(profile_df, profile_path)
-    record_operation(
-        "dataset_profile",
-        "Basic dataset shape, uniqueness, and date coverage.",
-        tables=[str(profile_path)],
-    )
-    missing_df = pd.DataFrame(
-        {
-            "column": df.columns,
-            "missing_count": df.isna().sum().values,
-            "missing_pct": (df.isna().mean() * 100).round(2).values,
-        }
-    ).sort_values(by="missing_pct", ascending=False)
-    missing_path = tables_dir / "02_missingness_by_column.csv"
-    save_table(missing_df, missing_path)
+    return df[numeric_cols].describe()
 
-    missing_top = missing_df.head(15).sort_values("missing_pct", ascending=True)
-    plt.figure(figsize=(11, 7))
-    plt.barh(missing_top["column"], missing_top["missing_pct"], color="#2C7FB8")
-    plt.xlabel("Missing Values (%)")
-    plt.ylabel("Column")
-    plt.title("Top 15 Columns by Missingness")
-    missing_plot_path = plots_dir / "02_missingness_top15.png"
-    save_plot(missing_plot_path)
-    record_operation(
-        "missingness_analysis",
-        "Column-level missing-value audit with percentages.",
-        tables=[str(missing_path)],
-        plots=[str(missing_plot_path)],
-    )
+# ============================================
+# EDA OPERATION 2: Temporal Analysis
+# ============================================
+def eda_temporal_patterns(df):
+    """
+    EDA 2: Analyze temporal patterns in crime
+    - Crime by hour of day
+    - Crime by day of week
+    - Crime by month
+    """
+    print("\n" + "="*60)
+    print("EDA 2: TEMPORAL PATTERNS")
+    print("="*60)
 
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    if len(numeric_cols) > 0:
-        numeric_summary = (
-            df[numeric_cols]
-            .describe(percentiles=[0.25, 0.5, 0.75, 0.9, 0.95])
-            .T.reset_index()
-            .rename(columns={"index": "column"})
-        )
-        numeric_summary_path = tables_dir / "03_numeric_descriptive_stats.csv"
-        save_table(numeric_summary, numeric_summary_path)
-        record_operation(
-            "numeric_descriptive_statistics",
-            "Distribution summary for all numeric columns.",
-            tables=[str(numeric_summary_path)],
-        )
-    else:
-        record_operation(
-            "numeric_descriptive_statistics",
-            "Distribution summary for all numeric columns.",
-            status="skipped",
-            note="No numeric columns available.",
-        )
-    crime_col = "crm_cd_desc" if "crm_cd_desc" in df.columns else ("crm_cd" if "crm_cd" in df.columns else None)
-    if crime_col:
-        crime_counts = (
-            df[crime_col]
-            .fillna("UNKNOWN")
-            .astype(str)
-            .value_counts()
-            .head(20)
-            .rename_axis("crime_type")
-            .reset_index(name="incident_count")
-        )
-        crime_counts["incident_pct"] = (crime_counts["incident_count"] / len(df) * 100).round(2)
-        crime_table_path = tables_dir / "04_top20_crime_types.csv"
-        save_table(crime_counts, crime_table_path)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-        plot_df = crime_counts.sort_values("incident_count", ascending=True)
-        plt.figure(figsize=(12, 8))
-        plt.barh(plot_df["crime_type"], plot_df["incident_count"], color="#F28E2B")
-        plt.xlabel("Incident Count")
-        plt.ylabel("Crime Type")
-        plt.title("Top 20 Crime Types")
-        crime_plot_path = plots_dir / "04_top20_crime_types.png"
-        save_plot(crime_plot_path)
+    # Crime by Hour
+    hourly_crimes = df['Hour'].value_counts().sort_index()
+    axes[0, 0].bar(hourly_crimes.index, hourly_crimes.values, color='steelblue', edgecolor='black')
+    axes[0, 0].set_title('Crimes by Hour of Day', fontsize=12, fontweight='bold')
+    axes[0, 0].set_xlabel('Hour')
+    axes[0, 0].set_ylabel('Number of Crimes')
+    axes[0, 0].set_xticks(range(0, 24, 2))
 
-        top_crime = crime_counts.iloc[0]
-        key_findings.append(
-            f"Most common crime type: {top_crime['crime_type']} ({int(top_crime['incident_count'])} incidents, {top_crime['incident_pct']}%)."
-        )
-        record_operation(
-            "crime_type_frequency",
-            "Top crime categories by count and percentage.",
-            tables=[str(crime_table_path)],
-            plots=[str(crime_plot_path)],
-        )
-    else:
-        record_operation(
-            "crime_type_frequency",
-            "Top crime categories by count and percentage.",
-            status="skipped",
-            note="No crime description/code column found.",
-        )
-        
-    if "area_name" in df.columns:
-        area_counts = (
-            df["area_name"]
-            .fillna("UNKNOWN")
-            .astype(str)
-            .value_counts()
-            .head(20)
-            .rename_axis("area_name")
-            .reset_index(name="incident_count")
-        )
-        area_counts["incident_pct"] = (area_counts["incident_count"] / len(df) * 100).round(2)
-        area_table_path = tables_dir / "05_top20_areas.csv"
-        save_table(area_counts, area_table_path)
+    # Crime by Day of Week
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    daily_crimes = df['DayOfWeek'].value_counts().reindex(day_order)
+    axes[0, 1].bar(range(7), daily_crimes.values, color='coral', edgecolor='black')
+    axes[0, 1].set_title('Crimes by Day of Week', fontsize=12, fontweight='bold')
+    axes[0, 1].set_xlabel('Day of Week')
+    axes[0, 1].set_ylabel('Number of Crimes')
+    axes[0, 1].set_xticks(range(7))
+    axes[0, 1].set_xticklabels(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
 
-        area_plot_df = area_counts.sort_values("incident_count", ascending=True)
-        plt.figure(figsize=(11, 8))
-        plt.barh(area_plot_df["area_name"], area_plot_df["incident_count"], color="#59A14F")
-        plt.xlabel("Incident Count")
-        plt.ylabel("Area")
-        plt.title("Top 20 Areas by Incident Volume")
-        area_plot_path = plots_dir / "05_top20_areas.png"
-        save_plot(area_plot_path)
+    # Crime by Month
+    monthly_crimes = df['Month'].value_counts().sort_index()
+    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    axes[1, 0].plot(monthly_crimes.index, monthly_crimes.values, marker='o', linewidth=2, markersize=8, color='green')
+    axes[1, 0].set_title('Crimes by Month (2024)', fontsize=12, fontweight='bold')
+    axes[1, 0].set_xlabel('Month')
+    axes[1, 0].set_ylabel('Number of Crimes')
+    axes[1, 0].set_xticks(range(1, 13))
+    axes[1, 0].set_xticklabels(month_names)
+    axes[1, 0].grid(True, alpha=0.3)
 
-        top_area = area_counts.iloc[0]
-        key_findings.append(
-            f"Highest incident area: {top_area['area_name']} ({int(top_area['incident_count'])} incidents, {top_area['incident_pct']}%)."
-        )
-        record_operation(
-            "area_distribution",
-            "Incident concentration by policing area.",
-            tables=[str(area_table_path)],
-            plots=[str(area_plot_path)],
-        )
-    else:
-        record_operation(
-            "area_distribution",
-            "Incident concentration by policing area.",
-            status="skipped",
-            note="Column `area_name` not found.",
-        )
-    if "date_occ" in df.columns and df["date_occ"].notna().any():
-        month_series = df["date_occ"].dt.to_period("M").dt.to_timestamp()
-        monthly_counts = (
-            month_series.value_counts().sort_index().rename_axis("month").reset_index(name="incident_count")
-        )
-        monthly_table_path = tables_dir / "06_monthly_trend.csv"
-        save_table(monthly_counts, monthly_table_path)
+    # Top Crime Types
+    top_crimes = df['Crm Cd Desc'].value_counts().head(10)
+    axes[1, 1].barh(range(len(top_crimes)), top_crimes.values, color='purple', edgecolor='black')
+    axes[1, 1].set_title('Top 10 Crime Types', fontsize=12, fontweight='bold')
+    axes[1, 1].set_xlabel('Number of Crimes')
+    axes[1, 1].set_yticks(range(len(top_crimes)))
+    axes[1, 1].set_yticklabels([label[:30] + '...' if len(label) > 30 else label for label in top_crimes.index], fontsize=8)
+    axes[1, 1].invert_yaxis()
 
-        plt.figure(figsize=(12, 5))
-        plt.plot(monthly_counts["month"], monthly_counts["incident_count"], marker="o", color="#4E79A7")
-        plt.xlabel("Month")
-        plt.ylabel("Incident Count")
-        plt.title("Monthly Crime Trend")
-        plt.xticks(rotation=45)
-        monthly_plot_path = plots_dir / "06_monthly_trend.png"
-        save_plot(monthly_plot_path)
-        record_operation(
-            "monthly_trend",
-            "Temporal trend of incidents aggregated by month.",
-            tables=[str(monthly_table_path)],
-            plots=[str(monthly_plot_path)],
-        )
-    else:
-        record_operation(
-            "monthly_trend",
-            "Temporal trend of incidents aggregated by month.",
-            status="skipped",
-            note="Column `date_occ` missing or empty.",
-        )
+    plt.tight_layout()
+    plt.savefig('figures/temporal_patterns.png', dpi=150, bbox_inches='tight')
+    plt.close()
 
-    dow_col = "occ_day_of_week"
-    if dow_col not in df.columns and "date_occ" in df.columns:
-        df[dow_col] = df["date_occ"].dt.day_name()
+    print("  - Saved temporal patterns visualization")
+    print(f"  - Peak crime hour: {hourly_crimes.idxmax()}:00 ({hourly_crimes.max():,} crimes)")
+    print(f"  - Highest crime day: {daily_crimes.idxmax()} ({daily_crimes.max():,} crimes)")
 
-    if dow_col in df.columns:
-        day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        dow_counts = (
-            df[dow_col]
-            .fillna("UNKNOWN")
-            .astype(str)
-            .value_counts()
-            .reindex(day_order + ["UNKNOWN"], fill_value=0)
-            .rename_axis("day_of_week")
-            .reset_index(name="incident_count")
-        )
-        dow_table_path = tables_dir / "07_day_of_week_distribution.csv"
-        save_table(dow_counts, dow_table_path)
+    return hourly_crimes, daily_crimes, monthly_crimes
 
-        plot_dow = dow_counts[dow_counts["day_of_week"] != "UNKNOWN"]
-        plt.figure(figsize=(11, 5))
-        plt.bar(plot_dow["day_of_week"], plot_dow["incident_count"], color="#E15759")
-        plt.xlabel("Day of Week")
-        plt.ylabel("Incident Count")
-        plt.title("Incidents by Day of Week")
-        plt.xticks(rotation=25)
-        dow_plot_path = plots_dir / "07_day_of_week_distribution.png"
-        save_plot(dow_plot_path)
+# ============================================
+# EDA OPERATION 3: Geographic Analysis
+# ============================================
+def eda_geographic_distribution(df):
+    """
+    EDA 3: Analyze geographic distribution of crimes
+    - Crime by area
+    - Crime density visualization
+    """
+    print("\n" + "="*60)
+    print("EDA 3: GEOGRAPHIC DISTRIBUTION")
+    print("="*60)
 
-        peak_day = plot_dow.sort_values("incident_count", ascending=False).iloc[0]
-        key_findings.append(
-            f"Peak day of week: {peak_day['day_of_week']} ({int(peak_day['incident_count'])} incidents)."
-        )
-        record_operation(
-            "day_of_week_pattern",
-            "Distribution of incidents by day of week.",
-            tables=[str(dow_table_path)],
-            plots=[str(dow_plot_path)],
-        )
-    else:
-        record_operation(
-            "day_of_week_pattern",
-            "Distribution of incidents by day of week.",
-            status="skipped",
-            note="No day-of-week information available.",
-        )
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-    if "occ_hour" not in df.columns and "time_occ" in df.columns:
-        time_numeric = pd.to_numeric(df["time_occ"], errors="coerce")
-        df["occ_hour"] = np.floor_divide(time_numeric, 100)
-        df.loc[~df["occ_hour"].between(0, 23), "occ_hour"] = np.nan
+    # Crime by Area
+    area_crimes = df['AREA NAME'].value_counts()
+    axes[0].barh(range(len(area_crimes)), area_crimes.values, color='teal', edgecolor='black')
+    axes[0].set_title('Crimes by LAPD Area', fontsize=12, fontweight='bold')
+    axes[0].set_xlabel('Number of Crimes')
+    axes[0].set_yticks(range(len(area_crimes)))
+    axes[0].set_yticklabels(area_crimes.index, fontsize=9)
+    axes[0].invert_yaxis()
 
-    if "occ_hour" in df.columns:
-        hour_counts = (
-            df["occ_hour"]
-            .dropna()
-            .astype(int)
-            .value_counts()
-            .reindex(range(24), fill_value=0)
-            .rename_axis("hour")
-            .reset_index(name="incident_count")
-        )
-        hour_table_path = tables_dir / "08_hour_of_day_distribution.csv"
-        save_table(hour_counts, hour_table_path)
+    # Crime coordinates scatter (sample for performance)
+    sample_df = df[df['Valid Coordinates']].sample(min(5000, len(df)), random_state=42)
+    scatter = axes[1].scatter(sample_df['LON'], sample_df['LAT'], 
+                              c=sample_df['Crm Cd'], cmap='tab10', 
+                              alpha=0.5, s=10)
+    axes[1].set_title('Crime Locations (Sample)', fontsize=12, fontweight='bold')
+    axes[1].set_xlabel('Longitude')
+    axes[1].set_ylabel('Latitude')
 
-        plt.figure(figsize=(12, 5))
-        plt.plot(hour_counts["hour"], hour_counts["incident_count"], marker="o", color="#76B7B2")
-        plt.xlabel("Hour of Day (0-23)")
-        plt.ylabel("Incident Count")
-        plt.title("Incidents by Hour of Day")
-        plt.xticks(range(0, 24, 1))
-        hour_plot_path = plots_dir / "08_hour_of_day_distribution.png"
-        save_plot(hour_plot_path)
+    plt.tight_layout()
+    plt.savefig('figures/geographic_distribution.png', dpi=150, bbox_inches='tight')
+    plt.close()
 
-        peak_hour = hour_counts.sort_values("incident_count", ascending=False).iloc[0]
-        key_findings.append(f"Peak incident hour: {int(peak_hour['hour']):02d}:00 ({int(peak_hour['incident_count'])} incidents).")
-        record_operation(
-            "hour_of_day_pattern",
-            "Hourly crime pattern across a 24-hour cycle.",
-            tables=[str(hour_table_path)],
-            plots=[str(hour_plot_path)],
-        )
-    else:
-        record_operation(
-            "hour_of_day_pattern",
-            "Hourly crime pattern across a 24-hour cycle.",
-            status="skipped",
-            note="No usable occurrence-time information available.",
-        )
+    print("  - Saved geographic distribution visualization")
+    print(f"  - Highest crime area: {area_crimes.idxmax()} ({area_crimes.max():,} crimes)")
 
-    # 9) Victim age distribution
-    if "vict_age" in df.columns and df["vict_age"].notna().any():
-        age_series = df["vict_age"].dropna()
-        age_summary = pd.DataFrame(
-            [
-                {
-                    "count": int(age_series.count()),
-                    "mean": round(float(age_series.mean()), 2),
-                    "median": round(float(age_series.median()), 2),
-                    "std": round(float(age_series.std()), 2),
-                    "min": int(age_series.min()),
-                    "q1": round(float(age_series.quantile(0.25)), 2),
-                    "q3": round(float(age_series.quantile(0.75)), 2),
-                    "max": int(age_series.max()),
-                }
-            ]
-        )
-        age_summary_path = tables_dir / "09_victim_age_summary.csv"
-        save_table(age_summary, age_summary_path)
+    return area_crimes
 
-        age_bins = [0, 12, 17, 24, 34, 44, 54, 64, 120]
-        age_labels = ["0-12", "13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
-        age_bucket = pd.cut(age_series, bins=age_bins, labels=age_labels, right=True)
-        age_bucket_df = age_bucket.value_counts().sort_index().rename_axis("age_group").reset_index(name="incident_count")
-        age_bucket_path = tables_dir / "09_victim_age_groups.csv"
-        save_table(age_bucket_df, age_bucket_path)
+# ============================================
+# EDA OPERATION 4: Victim Demographics
+# ============================================
+def eda_victim_demographics(df):
+    """
+    EDA 4: Analyze victim demographics
+    - Age distribution
+    - Sex distribution
+    - Ethnicity distribution
+    """
+    print("\n" + "="*60)
+    print("EDA 4: VICTIM DEMOGRAPHICS")
+    print("="*60)
 
-        plt.figure(figsize=(11, 5))
-        sns.histplot(age_series, bins=30, color="#AF7AA1")
-        plt.xlabel("Victim Age")
-        plt.ylabel("Incident Count")
-        plt.title("Victim Age Distribution")
-        age_plot_path = plots_dir / "09_victim_age_distribution.png"
-        save_plot(age_plot_path)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-        key_findings.append(
-            f"Victim age median: {round(float(age_series.median()), 2)} years (mean {round(float(age_series.mean()), 2)})."
-        )
-        record_operation(
-            "victim_age_distribution",
-            "Victim age summary statistics, bins, and histogram.",
-            tables=[str(age_summary_path), str(age_bucket_path)],
-            plots=[str(age_plot_path)],
-        )
-    else:
-        record_operation(
-            "victim_age_distribution",
-            "Victim age summary statistics, bins, and histogram.",
-            status="skipped",
-            note="Column `vict_age` missing or fully empty.",
-        )
-        
-    if "vict_sex" in df.columns:
-        sex_counts = (
-            df["vict_sex"]
-            .fillna("X")
-            .astype(str)
-            .str.upper()
-            .replace("", "X")
-            .value_counts()
-            .rename_axis("vict_sex")
-            .reset_index(name="incident_count")
-        )
-        sex_counts["incident_pct"] = (sex_counts["incident_count"] / len(df) * 100).round(2)
-        sex_table_path = tables_dir / "10_victim_sex_distribution.csv"
-        save_table(sex_counts, sex_table_path)
+    # Age distribution
+    valid_ages = df[df['Vict Age'].notna() & (df['Vict Age'] > 0) & (df['Vict Age'] < 100)]
+    axes[0, 0].hist(valid_ages['Vict Age'], bins=30, color='skyblue', edgecolor='black')
+    axes[0, 0].set_title('Victim Age Distribution', fontsize=12, fontweight='bold')
+    axes[0, 0].set_xlabel('Age')
+    axes[0, 0].set_ylabel('Frequency')
+    axes[0, 0].axvline(valid_ages['Vict Age'].median(), color='red', linestyle='--', 
+                       label=f'Median: {valid_ages["Vict Age"].median():.1f}')
+    axes[0, 0].legend()
 
-        plt.figure(figsize=(8, 5))
-        plt.bar(sex_counts["vict_sex"], sex_counts["incident_count"], color="#FF9DA7")
-        plt.xlabel("Victim Sex")
-        plt.ylabel("Incident Count")
-        plt.title("Victim Sex Distribution")
-        sex_plot_path = plots_dir / "10_victim_sex_distribution.png"
-        save_plot(sex_plot_path)
-        record_operation(
-            "victim_sex_distribution",
-            "Victim sex category distribution.",
-            tables=[str(sex_table_path)],
-            plots=[str(sex_plot_path)],
-        )
-    else:
-        record_operation(
-            "victim_sex_distribution",
-            "Victim sex category distribution.",
-            status="skipped",
-            note="Column `vict_sex` not found.",
-        )
+    # Age group distribution
+    age_group_counts = df['Age Group'].value_counts().sort_index()
+    axes[0, 1].bar(range(len(age_group_counts)), age_group_counts.values, 
+                   color='lightgreen', edgecolor='black')
+    axes[0, 1].set_title('Crimes by Age Group', fontsize=12, fontweight='bold')
+    axes[0, 1].set_xlabel('Age Group')
+    axes[0, 1].set_ylabel('Number of Crimes')
+    axes[0, 1].set_xticks(range(len(age_group_counts)))
+    axes[0, 1].set_xticklabels(age_group_counts.index, rotation=45)
 
-    if "weapon_desc" in df.columns:
-        weapon_counts = (
-            df["weapon_desc"]
-            .fillna("NO WEAPON REPORTED")
-            .astype(str)
-            .str.upper()
-            .value_counts()
-            .head(20)
-            .rename_axis("weapon_desc")
-            .reset_index(name="incident_count")
-        )
-        weapon_counts["incident_pct"] = (weapon_counts["incident_count"] / len(df) * 100).round(2)
-        weapon_table_path = tables_dir / "11_weapon_usage_top20.csv"
-        save_table(weapon_counts, weapon_table_path)
+    # Sex distribution
+    sex_counts = df['Vict Sex Clean'].value_counts()
+    colors = ['#ff9999', '#66b3ff', '#99ff99']
+    axes[1, 0].pie(sex_counts.values, labels=sex_counts.index, autopct='%1.1f%%',
+                   colors=colors, startangle=90)
+    axes[1, 0].set_title('Victim Sex Distribution', fontsize=12, fontweight='bold')
 
-        weapon_plot_df = weapon_counts.sort_values("incident_count", ascending=True)
-        plt.figure(figsize=(12, 8))
-        plt.barh(weapon_plot_df["weapon_desc"], weapon_plot_df["incident_count"], color="#9C755F")
-        plt.xlabel("Incident Count")
-        plt.ylabel("Weapon Category")
-        plt.title("Top 20 Weapon Usage Categories")
-        weapon_plot_path = plots_dir / "11_weapon_usage_top20.png"
-        save_plot(weapon_plot_path)
-        record_operation(
-            "weapon_usage_analysis",
-            "Weapon category frequencies, including non-weapon incidents.",
-            tables=[str(weapon_table_path)],
-            plots=[str(weapon_plot_path)],
-        )
-    else:
-        record_operation(
-            "weapon_usage_analysis",
-            "Weapon category frequencies, including non-weapon incidents.",
-            status="skipped",
-            note="Column `weapon_desc` not found.",
-        )
-        
-    if "report_delay_days" not in df.columns and {"date_rptd", "date_occ"}.issubset(df.columns):
-        df["report_delay_days"] = (df["date_rptd"] - df["date_occ"]).dt.days
-        df.loc[df["report_delay_days"] < 0, "report_delay_days"] = np.nan
+    # Descent distribution (top 8)
+    descent_counts = df['Vict Descent Clean'].value_counts().head(8)
+    axes[1, 1].bar(range(len(descent_counts)), descent_counts.values, 
+                   color='orange', edgecolor='black')
+    axes[1, 1].set_title('Victim Descent (Top 8)', fontsize=12, fontweight='bold')
+    axes[1, 1].set_xlabel('Descent')
+    axes[1, 1].set_ylabel('Number of Crimes')
+    axes[1, 1].set_xticks(range(len(descent_counts)))
+    axes[1, 1].set_xticklabels(descent_counts.index, rotation=45, ha='right')
 
-    if "report_delay_days" in df.columns and df["report_delay_days"].notna().any():
-        delay = df["report_delay_days"].dropna()
-        delay_summary = pd.DataFrame(
-            [
-                {
-                    "count": int(delay.count()),
-                    "mean": round(float(delay.mean()), 2),
-                    "median": round(float(delay.median()), 2),
-                    "p90": round(float(delay.quantile(0.9)), 2),
-                    "p95": round(float(delay.quantile(0.95)), 2),
-                    "max": round(float(delay.max()), 2),
-                }
-            ]
-        )
-        delay_summary_path = tables_dir / "12_report_delay_summary.csv"
-        save_table(delay_summary, delay_summary_path)
+    plt.tight_layout()
+    plt.savefig('figures/victim_demographics.png', dpi=150, bbox_inches='tight')
+    plt.close()
 
-        capped_delay = delay.clip(upper=delay.quantile(0.95))
-        plt.figure(figsize=(11, 5))
-        sns.histplot(capped_delay, bins=30, color="#BAB0AC")
-        plt.xlabel("Report Delay (Days, capped at 95th percentile)")
-        plt.ylabel("Incident Count")
-        plt.title("Distribution of Report Delay")
-        delay_plot_path = plots_dir / "12_report_delay_distribution.png"
-        save_plot(delay_plot_path)
+    print("  - Saved victim demographics visualization")
+    print(f"  - Median victim age: {valid_ages['Vict Age'].median():.1f}")
+    print(f"  - Most common victim sex: {sex_counts.idxmax()} ({sex_counts.max():,})")
 
-        key_findings.append(
-            f"Median report delay: {round(float(delay.median()), 2)} days (95th percentile: {round(float(delay.quantile(0.95)), 2)} days)."
-        )
-        record_operation(
-            "report_delay_analysis",
-            "Summary and distribution of delay between occurrence and reporting.",
-            tables=[str(delay_summary_path)],
-            plots=[str(delay_plot_path)],
-        )
-    else:
-        record_operation(
-            "report_delay_analysis",
-            "Summary and distribution of delay between occurrence and reporting.",
-            status="skipped",
-            note="No usable report delay information found.",
-        )
+    return valid_ages, sex_counts, descent_counts
 
-    status_col = "status_desc" if "status_desc" in df.columns else ("status" if "status" in df.columns else None)
-    if status_col:
-        status_counts = (
-            df[status_col]
-            .fillna("UNKNOWN")
-            .astype(str)
-            .str.upper()
-            .value_counts()
-            .rename_axis("status")
-            .reset_index(name="incident_count")
-        )
-        status_counts["incident_pct"] = (status_counts["incident_count"] / len(df) * 100).round(2)
-        status_table_path = tables_dir / "13_case_status_distribution.csv"
-        save_table(status_counts, status_table_path)
+# ============================================
+# EDA OPERATION 5: Crime Type Analysis
+# ============================================
+def eda_crime_type_analysis(df):
+    """
+    EDA 5: Deep dive into crime types and categories
+    """
+    print("\n" + "="*60)
+    print("EDA 5: CRIME TYPE ANALYSIS")
+    print("="*60)
 
-        top_status = status_counts.head(10).sort_values("incident_count", ascending=True)
-        plt.figure(figsize=(10, 6))
-        plt.barh(top_status["status"], top_status["incident_count"], color="#EDC948")
-        plt.xlabel("Incident Count")
-        plt.ylabel("Case Status")
-        plt.title("Top Case Status Categories")
-        status_plot_path = plots_dir / "13_case_status_distribution.png"
-        save_plot(status_plot_path)
-        record_operation(
-            "case_status_distribution",
-            "Distribution of reported case statuses.",
-            tables=[str(status_table_path)],
-            plots=[str(status_plot_path)],
-        )
-    else:
-        record_operation(
-            "case_status_distribution",
-            "Distribution of reported case statuses.",
-            status="skipped",
-            note="No case status column found.",
-        )
-        
-        
-        
-    if {"lat", "lon"}.issubset(df.columns):
-        geo_df = df[["lon", "lat"]].dropna()
-        if not geo_df.empty:
-            plt.figure(figsize=(10, 8))
-            hb = plt.hexbin(geo_df["lon"], geo_df["lat"], gridsize=65, cmap="viridis", mincnt=1)
-            cb = plt.colorbar(hb)
-            cb.set_label("Incident Count")
-            plt.xlabel("Longitude")
-            plt.ylabel("Latitude")
-            plt.title("Geospatial Hotspots of Incidents (Hexbin)")
-            geo_plot_path = plots_dir / "14_geospatial_hotspots_hexbin.png"
-            save_plot(geo_plot_path)
-            record_operation(
-                "geospatial_hotspot_analysis",
-                "Hexbin map showing geographic concentration of incidents.",
-                plots=[str(geo_plot_path)],
-            )
-        else:
-            record_operation(
-                "geospatial_hotspot_analysis",
-                "Hexbin map showing geographic concentration of incidents.",
-                status="skipped",
-                note="No valid latitude/longitude values available.",
-            )
-    else:
-        record_operation(
-            "geospatial_hotspot_analysis",
-            "Hexbin map showing geographic concentration of incidents.",
-            status="skipped",
-            note="`lat`/`lon` columns not found.",
-        )
-    completed_ops = [op for op in operations if op["status"] == "completed"]
-    skipped_ops = [op for op in operations if op["status"] == "skipped"]
-    eda_summary: Dict[str, Any] = {
-        "input_path": str(input_path),
-        "output_dir": str(output_dir),
-        "rows_analyzed": int(len(df)),
-        "columns_analyzed": int(len(df.columns)),
-        "completed_operations": len(completed_ops),
-        "skipped_operations": len(skipped_ops),
-        "operations": operations,
-        "key_findings": key_findings,
-    }
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-    summary_json_path = output_dir / "eda_summary.json"
-    with summary_json_path.open("w", encoding="utf-8") as f:
-        json.dump(eda_summary, f, indent=2, default=str)
+    # Crime categories
+    crime_cat = df['Crime Category'].value_counts()
+    axes[0].barh(range(len(crime_cat)), crime_cat.values, color='indianred', edgecolor='black')
+    axes[0].set_title('Crimes by Category', fontsize=12, fontweight='bold')
+    axes[0].set_xlabel('Number of Crimes')
+    axes[0].set_yticks(range(len(crime_cat)))
+    axes[0].set_yticklabels(crime_cat.index, fontsize=9)
+    axes[0].invert_yaxis()
 
-    findings_txt_path = output_dir / "eda_key_findings.txt"
-    with findings_txt_path.open("w", encoding="utf-8") as f:
-        f.write("EDA Key Findings\n")
-        f.write("=================\n")
-        if key_findings:
-            for idx, finding in enumerate(key_findings, start=1):
-                f.write(f"{idx}. {finding}\n")
-        else:
-            f.write("No key findings generated.\n")
+    # Premise categories
+    premise_cat = df['Premise Category'].value_counts()
+    axes[1].barh(range(len(premise_cat)), premise_cat.values, color='mediumseagreen', edgecolor='black')
+    axes[1].set_title('Crimes by Premise Type', fontsize=12, fontweight='bold')
+    axes[1].set_xlabel('Number of Crimes')
+    axes[1].set_yticks(range(len(premise_cat)))
+    axes[1].set_yticklabels(premise_cat.index, fontsize=9)
+    axes[1].invert_yaxis()
 
-    return {
-        "summary_json": str(summary_json_path),
-        "findings_txt": str(findings_txt_path),
-        "tables_dir": str(tables_dir),
-        "plots_dir": str(plots_dir),
-        "completed_operations": len(completed_ops),
-        "skipped_operations": len(skipped_ops),
-    }
+    plt.tight_layout()
+    plt.savefig('figures/crime_type_analysis.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print("  - Saved crime type analysis visualization")
+
+    return crime_cat, premise_cat
+
+# ============================================
+# EDA OPERATION 6: Reporting Patterns
+# ============================================
+def eda_reporting_patterns(df):
+    """
+    EDA 6: Analyze crime reporting patterns
+    - Reporting delay distribution
+    - Status of investigations
+    """
+    print("\n" + "="*60)
+    print("EDA 6: REPORTING PATTERNS")
+    print("="*60)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # Reporting delay
+    delays = df[df['Reporting Delay (Days)'] <= 30]['Reporting Delay (Days)']
+    axes[0].hist(delays, bins=30, color='gold', edgecolor='black')
+    axes[0].set_title('Reporting Delay Distribution (≤30 days)', fontsize=12, fontweight='bold')
+    axes[0].set_xlabel('Days Between Crime and Report')
+    axes[0].set_ylabel('Frequency')
+    axes[0].axvline(delays.median(), color='red', linestyle='--',
+                    label=f'Median: {delays.median():.1f} days')
+    axes[0].legend()
+
+    # Case status
+    status_counts = df['Status Desc'].value_counts()
+    axes[1].pie(status_counts.values, labels=status_counts.index, autopct='%1.1f%%',
+                startangle=90)
+    axes[1].set_title('Case Status Distribution', fontsize=12, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig('figures/reporting_patterns.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print("  - Saved reporting patterns visualization")
+    print(f"  - Median reporting delay: {delays.median():.1f} days")
+
+    return delays, status_counts
+
+# ============================================
+# EDA OPERATION 7: Cross-tabulation Analysis
+# ============================================
+def eda_cross_tabulation(df):
+    """
+    EDA 7: Cross-tabulation analysis
+    - Crime category by victim sex
+    - Crime by area and time
+    """
+    print("\n" + "="*60)
+    print("EDA 7: CROSS-TABULATION ANALYSIS")
+    print("="*60)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # Crime category by sex
+    cross_tab = pd.crosstab(df['Crime Category'], df['Vict Sex Clean'], normalize='columns') * 100
+    cross_tab.plot(kind='bar', ax=axes[0], stacked=True)
+    axes[0].set_title('Crime Category by Victim Sex (%)', fontsize=12, fontweight='bold')
+    axes[0].set_xlabel('Crime Category')
+    axes[0].set_ylabel('Percentage')
+    axes[0].legend(title='Sex', bbox_to_anchor=(1.05, 1), loc='upper left')
+    axes[0].tick_params(axis='x', rotation=45)
+
+    # Top areas by crime category
+    top_areas = df['AREA NAME'].value_counts().head(5).index
+    area_crime_cross = pd.crosstab(df[df['AREA NAME'].isin(top_areas)]['AREA NAME'], 
+                                    df[df['AREA NAME'].isin(top_areas)]['Crime Category'])
+    area_crime_cross.plot(kind='bar', ax=axes[1], stacked=True)
+    axes[1].set_title('Crime Categories by Top 5 Areas', fontsize=12, fontweight='bold')
+    axes[1].set_xlabel('Area')
+    axes[1].set_ylabel('Number of Crimes')
+    axes[1].legend(title='Crime Category', bbox_to_anchor=(1.05, 1), loc='upper left')
+    axes[1].tick_params(axis='x', rotation=45)
+
+    plt.tight_layout()
+    plt.savefig('figures/cross_tabulation.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print("  - Saved cross-tabulation visualization")
+
+    return cross_tab, area_crime_cross
+
+# ============================================
+# EDA OPERATION 8: Correlation Analysis
+# ============================================
+def eda_correlation_analysis(df):
+    """
+    EDA 8: Correlation analysis of numeric variables
+    """
+    print("\n" + "="*60)
+    print("EDA 8: CORRELATION ANALYSIS")
+    print("="*60)
+
+    # Select numeric columns
+    numeric_df = df[['Vict Age', 'Hour', 'Month', 'Reporting Delay (Days)', 'LAT', 'LON']].copy()
+
+    # Calculate correlation matrix
+    corr_matrix = numeric_df.corr()
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, 
+                square=True, ax=ax, fmt='.2f')
+    ax.set_title('Correlation Matrix of Numeric Variables', fontsize=12, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig('figures/correlation_matrix.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print("  - Saved correlation matrix visualization")
+    print("\nCorrelation Matrix:")
+    print(corr_matrix.round(2))
+
+    return corr_matrix
+
+# ============================================
+# EDA OPERATION 9: Outlier Detection
+# ============================================
+def eda_outlier_detection(df):
+    """
+    EDA 9: Detect and visualize outliers using box plots
+    """
+    print("\n" + "="*60)
+    print("EDA 9: OUTLIER DETECTION")
+    print("="*60)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Age outliers
+    valid_ages = df[(df['Vict Age'].notna()) & (df['Vict Age'] > 0) & (df['Vict Age'] < 100)]['Vict Age']
+    axes[0].boxplot(valid_ages, vert=True)
+    axes[0].set_title('Age Distribution (Box Plot)', fontsize=12, fontweight='bold')
+    axes[0].set_ylabel('Age')
+
+    # Reporting delay outliers
+    delay_data = df[df['Reporting Delay (Days)'] <= 100]['Reporting Delay (Days)']
+    axes[1].boxplot(delay_data, vert=True)
+    axes[1].set_title('Reporting Delay (Box Plot)', fontsize=12, fontweight='bold')
+    axes[1].set_ylabel('Days')
+
+    # Hour distribution
+    axes[2].boxplot(df['Hour'], vert=True)
+    axes[2].set_title('Hour Distribution (Box Plot)', fontsize=12, fontweight='bold')
+    axes[2].set_ylabel('Hour')
+
+    plt.tight_layout()
+    plt.savefig('figures/outlier_detection.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print("  - Saved outlier detection visualization")
+
+    # Calculate IQR for age
+    Q1 = valid_ages.quantile(0.25)
+    Q3 = valid_ages.quantile(0.75)
+    IQR = Q3 - Q1
+    outliers = valid_ages[(valid_ages < (Q1 - 1.5 * IQR)) | (valid_ages > (Q3 + 1.5 * IQR))]
+    print(f"  - Age outliers (IQR method): {len(outliers)} records")
+
+    return outliers
+
+# ============================================
+# EDA OPERATION 10: Weapon Usage Analysis
+# ============================================
+def eda_weapon_analysis(df):
+    """
+    EDA 10: Analyze weapon usage in crimes
+    """
+    print("\n" + "="*60)
+    print("EDA 10: WEAPON USAGE ANALYSIS")
+    print("="*60)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # Weapon usage (has weapon vs no weapon)
+    has_weapon = df['Weapon Used Cd'].notna().sum()
+    no_weapon = df['Weapon Used Cd'].isna().sum()
+
+    weapon_summary = pd.Series({'No Weapon': no_weapon, 'Weapon Used': has_weapon})
+    axes[0].pie(weapon_summary.values, labels=weapon_summary.index, autopct='%1.1f%%',
+                colors=['lightblue', 'salmon'], startangle=90)
+    axes[0].set_title('Weapon Usage in Crimes', fontsize=12, fontweight='bold')
+
+    # Top weapon types
+    top_weapons = df['Weapon Desc'].value_counts().head(8)
+    axes[1].barh(range(len(top_weapons)), top_weapons.values, color='crimson', edgecolor='black')
+    axes[1].set_title('Top Weapon Types', fontsize=12, fontweight='bold')
+    axes[1].set_xlabel('Number of Crimes')
+    axes[1].set_yticks(range(len(top_weapons)))
+    axes[1].set_yticklabels(top_weapons.index, fontsize=9)
+    axes[1].invert_yaxis()
+
+    plt.tight_layout()
+    plt.savefig('figures/weapon_analysis.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print("  - Saved weapon analysis visualization")
+    print(f"  - Crimes with weapons: {has_weapon:,} ({has_weapon/len(df)*100:.1f}%)")
+
+    return weapon_summary, top_weapons
 
 def main():
-    args = parse_args()
-    result = run_eda(args.input, args.output_dir)
-    print("EDA complete.")
-    print(f"Completed operations: {result['completed_operations']}")
-    print(f"Skipped operations: {result['skipped_operations']}")
-    print(f"Tables: {result['tables_dir']}")
-    print(f"Plots: {result['plots_dir']}")
-    print(f"Summary JSON: {result['summary_json']}")
-    print(f"Key findings TXT: {result['findings_txt']}")
+    """Main EDA pipeline."""
+    # Load cleaned data
+    df = load_cleaned_data('data/processed/crime_data_cleaned.csv')
 
+    # Run all EDA operations
+    eda_summary_statistics(df)
+    eda_temporal_patterns(df)
+    eda_geographic_distribution(df)
+    eda_victim_demographics(df)
+    eda_crime_type_analysis(df)
+    eda_reporting_patterns(df)
+    eda_cross_tabulation(df)
+    eda_correlation_analysis(df)
+    eda_outlier_detection(df)
+    eda_weapon_analysis(df)
+
+    print("\n" + "="*60)
+    print("EDA COMPLETE - All visualizations saved to figures/")
+    print("="*60)
 
 if __name__ == "__main__":
+    main()
+name__ == "__main__":
     main()
