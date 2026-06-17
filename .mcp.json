@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "safecity-crime-predictor": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "src/mcp/server.py"
+      ],
+      "env": {}
+    }
+  }
+}

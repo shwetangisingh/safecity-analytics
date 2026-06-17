@@ -1,0 +1,5 @@
+Algorithm,Test Accuracy,Weighted F1,3-Fold CV Acc,Train Time (s),Predict Time (s)
+kNN (k=7),0.7946,0.7771,0.785,0.26,1.0678
+Decision Tree,0.8114,0.7997,0.8014,0.32,0.004
+Naive Bayes,0.5104,0.3961,0.5058,0.11,0.001
+Random Forest,0.815,0.8063,0.8137,3.15,0.2285
